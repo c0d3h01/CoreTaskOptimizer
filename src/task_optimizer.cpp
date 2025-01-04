@@ -45,14 +45,13 @@
 using namespace std;
 
 // Dirs for logs.
-const string LOG_DIR = "/data/adb/modules/task_optimizer/logs/";
-const string LAUNCHER_LOG = LOG_DIR + "launcher_package.log";
-const string AFFINITY_LOG = LOG_DIR + "affinity.log";
-const string RT_LOG = LOG_DIR + "rt.log";
-const string CGROUP_LOG = LOG_DIR + "cgroup.log";
-const string NICE_LOG = LOG_DIR + "nice.log";
-const string IOPRIO_LOG = LOG_DIR + "ioprio.log";
-const string IRQ_LOG = LOG_DIR + "irqaffinity.log";
+const string LAUNCHER_LOG = "/data/adb/modules/task_optimizer/logs/launcher_package.log";
+const string AFFINITY_LOG = "/data/adb/modules/task_optimizer/logs/affinity.log";
+const string RT_LOG = "/data/adb/modules/task_optimizer/logs/rt.log";
+const string CGROUP_LOG = "/data/adb/modules/task_optimizer/logs/cgroup.log";
+const string NICE_LOG = "/data/adb/modules/task_optimizer/logs/nice.log";
+const string IOPRIO_LOG = "/data/adb/modules/task_optimizer/logs/ioprio.log";
+const string IRQ_LOG = "/data/adb/modules/task_optimizer/logs/irqaffinity.log";
 
 // Function_declarations.
 void unpinThread(const string& taskName, const string& threadName);
@@ -343,25 +342,7 @@ void changeTaskRtFf(const string& taskName, int niceVal) {
 
 // Function to change task priority to high.
 void changeTaskHighPrio(const string& taskName) {
-    changeTaskNice(taskName, -20);
-}
-
-void changeTaskMediumPrio(const string& taskName) {
-    // Set nice value to -10 (between high priority -20 and default 0)
-    changeTaskNice(taskName, -10);
-    
-    // Set real-time priority to a medium value (e.g., 25)
-    changeTaskRt(taskName, 25);
-    
-    // Pin to a mix of performance and efficiency cores
-    // Assuming a big.LITTLE architecture with 8 cores where 0-3 are LITTLE and 4-7 are big
-    pinProcOnCpus(taskName, "5f");  // This allows the task to run on cores 0-3 and 4-5
-    
-    // Set I/O priority to a medium level
-    changeTaskIoPrio(taskName, 2, 4);  // Class 2 (Best-effort), priority level 4 (middle)
-    
-    // Log the action
-    // logMessage("Set medium priority for task: " + taskName, LOG_DIR + "medium_prio.log");
+    changeTaskNice(taskName, -15);
 }
 
 // Function to change task priority to RT, with idle priority.
@@ -372,10 +353,10 @@ void changeTaskRtIdle(const string& taskName) {
 int main() {
     try {
         // Create log directory
-        filesystem::create_directories(LOG_DIR);
-        ofstream logFile(LOG_DIR + "task-optimizer-main.log", ios::app);
+        filesystem::create_directories("/data/adb/modules/task_optimizer/logs/");
+        ofstream logFile("/data/adb/modules/task_optimizer/logs/task-optimizer-main.log", ios::app);
         logFile << "" << endl;
-        logFile << "Core Task Optimizer v1.1.4 started" << endl;
+        logFile << "Core optimization started..." << endl;
         
         // Set intent action and category
         string INTENT_ACTION = "android.intent.action.MAIN";
@@ -393,15 +374,6 @@ int main() {
             "touch_delta_wq", "tp_async", "wakeup_clk_wq", "thread_fence", "Input"
         };
 
-        // MID task list definitions.
-        vector<string> TASK_NAMES_MEDIUM_PRIO = {
-        "kswapd", "oom_reaper", "ion_system_heap", "dmabuf_system_heap", "f2fs_flush-*", "jbd2/*",
-        "mdss_fb", "mdss_disp_wake", "vsync_retire_work", "pq@", "kcompactd",
-        "ksm_scan_thread", "khugepaged", "writeback", "cfg80211", "irq/*-pcie",
-        "mmcqd/*", "jbd2/*-*", "ext4-rsv-conver", "ext4lazyinit", "binder:*_1",
-        "binder:*_2", "binder:*_3", "binder:*_4", "hwcomposer-*", "kworker/*+"
-        };
-
         // LOW Task definitions.
         vector<string> TASK_NAMES_LOW_PRIO = {"ipawq", "iparepwq", "wlan_logging_th"};
 
@@ -414,17 +386,12 @@ int main() {
         vector<string> TASK_NAMES_RT_IDLE = {"f2fs_gc"};
         vector<string> TASK_NAMES_IO_PRIO = {"f2fs_gc"};
 
-        // HIGH_PRIO, Input dispatcher/reader.
+        // High priority tasks.
         for (const string& taskName : TASK_NAMES_HIGH_PRIO) {
             changeTaskHighPrio(taskName);
         }
 
-        // Handle medium priority tasks.
-        for (const string& taskName : TASK_NAMES_MEDIUM_PRIO) {
-            changeTaskMediumPrio(taskName);
-        }
-
-        // LOW_PRIO, Not important.
+        // Low priority tasks.
         for (const string& taskName : TASK_NAMES_LOW_PRIO) {
             changeTaskNice(taskName, 0);
         }
@@ -480,11 +447,11 @@ int main() {
         }
 
         logFile << "" << endl;
-        logFile << "Core Task Optimizer v1.1.4 finished successfully" << endl;
+        logFile << "Task Optimization executed successfully!" << endl;
         logFile.close();
 
     } catch (const exception& e) {
-        ofstream errorLog(LOG_DIR + "error.log", ios::app);
+        ofstream errorLog("/data/adb/modules/task_optimizer/logs/error.log", ios::app);
         errorLog << "Exxception occurred: " << e.what() << endl;
         errorLog.close();
         return 1;
