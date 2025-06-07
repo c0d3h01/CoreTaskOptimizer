@@ -11,420 +11,267 @@
 #include <fstream>
 #include <filesystem>
 #include <sstream>
+#include <chrono>
+#include <iomanip>
+#include <map>
+#include <set>
 
-using namespace std;
+// ------------- CONFIGURABLE SECTION ------------- //
+// All log paths and tunable parameters centralized here for easy edits.
 
-// Dirs for logs.
-const string LAUNCHER_LOG = "/data/adb/modules/task_optimizer/logs/launcher_package.log";
-const string AFFINITY_LOG = "/data/adb/modules/task_optimizer/logs/affinity.log";
-const string RT_LOG = "/data/adb/modules/task_optimizer/logs/rt.log";
-const string CGROUP_LOG = "/data/adb/modules/task_optimizer/logs/cgroup.log";
-const string NICE_LOG = "/data/adb/modules/task_optimizer/logs/nice.log";
-const string IOPRIO_LOG = "/data/adb/modules/task_optimizer/logs/ioprio.log";
-const string IRQ_LOG = "/data/adb/modules/task_optimizer/logs/irqaffinity.log";
+namespace config {
+    const std::string LOG_DIR = "/data/adb/modules/task_optimizer/logs/";
+    const std::map<std::string, std::string> LOG_FILES = {
+        {"launcher", LOG_DIR + "launcher_package.log"},
+        {"affinity", LOG_DIR + "affinity.log"},
+        {"rt",       LOG_DIR + "rt.log"},
+        {"cgroup",   LOG_DIR + "cgroup.log"},
+        {"nice",     LOG_DIR + "nice.log"},
+        {"ioprio",   LOG_DIR + "ioprio.log"},
+        {"irq",      LOG_DIR + "irqaffinity.log"},
+        {"main",     LOG_DIR + "task-optimizer-main.log"},
+        {"error",    LOG_DIR + "error.log"}
+    };
 
-// Function_declarations.
-void unpinThread(const string& taskName, const string& threadName);
-void unpinProc(const string& taskName);
-void pinThreadOnCpus(const string& taskName, const string& threadName, const string& cpus);
-void pinProcOnCpus(const string& taskName, const string& cpus);
+    // Task groups - update here to adjust behaviors
+    const std::vector<std::string> TASK_NAMES_HIGH_PRIO = {
+        "servicemanag", "zygote", "writeback", "kblockd", "rcu_tasks_kthre", "ufs_clk_gating",
+        "mmc_clk_gate", "system", "kverityd", "speedup_resume_wq", "load_tp_fw_wq", "tcm_freq_hop",
+        "touch_delta_wq", "tp_async", "wakeup_clk_wq", "thread_fence", "Input"
+    };
+    const std::vector<std::string> TASK_NAMES_LOW_PRIO = {"ipawq", "iparepwq", "wlan_logging_th"};
+    const std::vector<std::string> TASK_NAMES_RT_FF = {
+        "kgsl_worker_thread", "devfreq_boost", "mali_jd_thread", "mali_event_thread", "crtc_commit",
+        "crtc_event", "pp_event", "rot_commitq_", "rot_doneq_", "rot_fenceq_", "system_server",
+        "surfaceflinger", "composer", "fts_wq", "nvt_ts_work"
+    };
+    const std::vector<std::string> TASK_NAMES_RT_IDLE = {"f2fs_gc"};
+    const std::vector<std::string> TASK_NAMES_IO_PRIO = {"f2fs_gc"};
 
-// Error_logging.
-void logError(const string& message, const string& logFile) {
-    ofstream log(logFile, ios::app);
+    // CPU masks, IRQ masks, etc. centralized here
+    const std::string RENDERTHREAD_MASK = "ff";
+    const std::string GPUWORKERS_MASK = "0f";
+    const std::string PERFCORE_MASK = "80";
+    const std::string MIDCORE_MASK = "70";
+    const std::string GENERAL_MASK = "f0";
+}
+
+// ------------- LOGGING UTILITY ------------- //
+void logMessage(const std::string& message, const std::string& logFile) {
+    std::ofstream log(logFile, std::ios::app);
     if (log.is_open()) {
-        log << "[ERROR] " << message << endl;
-        log.close();
+        auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        log << "[" << std::put_time(std::localtime(&now), "%F %T") << "] " << message << std::endl;
     } else {
-        cerr << "[ERROR] Cannot write to log file: " << logFile << endl;
+        std::cerr << "[ERROR] Cannot write to log file: " << logFile << std::endl;
     }
 }
 
-// Execute a shell command and log the output .
-string executeCommand(const string& command, const string& logFilePath) {  
-    string result;
+// ------------- SHELL EXECUTION UTILITY ------------- //
+std::string executeCommand(const std::string& command, const std::string& logKey) {
+    std::string result;
     FILE* pipe = popen(command.c_str(), "r");
-    
     if (pipe) {
         char buffer[128];
         while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
             result += buffer;
         }
-        pclose(pipe);
-        
-        ofstream logFile(logFilePath, ios::app);
-        if (logFile.is_open()) {
-            logFile << "Executed: " << command << endl;
-            logFile.close();
-        }
+        int status = pclose(pipe);
+        logMessage("Executed: " + command + (status ? " [fail]" : " [ok]"), config::LOG_FILES.at(logKey));
     } else {
-        cerr << "Failed to execute command: " << command << endl;
+        logMessage("Failed to execute: " + command, config::LOG_FILES.at(logKey));
     }
-    
     return result;
 }
 
-// Helper function to get the process IDs for a given task name.
-vector<pid_t> getProcessIDs(const string& taskName) {
-    vector<pid_t> pids;
-    string command = "pgrep -f '" + taskName + "'";
-    FILE* pipe = popen(command.c_str(), "r");
+// ------------- PROCFS UTILITIES ------------- //
+// Directly parse /proc for performance and resilience.
 
-    if (pipe) {
-        char buffer[128];
-        while (fgets(buffer, sizeof(buffer), pipe)) {
-            pid_t pid = atoi(buffer);
-            pids.push_back(pid);
+std::vector<pid_t> getProcessIDs(const std::string& namePattern) {
+    std::vector<pid_t> pids;
+    std::regex pattern(namePattern);
+    for (const auto& entry : std::filesystem::directory_iterator("/proc")) {
+        if (!entry.is_directory()) continue;
+        std::string pidStr = entry.path().filename();
+        if (!std::all_of(pidStr.begin(), pidStr.end(), ::isdigit)) continue;
+        std::ifstream commFile(entry.path()/"comm");
+        if (!commFile) continue;
+        std::string comm;
+        std::getline(commFile, comm);
+        if (std::regex_search(comm, pattern)) {
+            pids.push_back(std::stoi(pidStr));
         }
-        pclose(pipe);
     }
-
     return pids;
 }
 
-// Helper function to get the thread IDs for a given process ID.
-vector<pid_t> getThreadIDs(pid_t pid) {
-    vector<pid_t> tids;
-    string taskDir = "/proc/" + to_string(pid) + "/task";
-    DIR* dir = opendir(taskDir.c_str());
-    
-    if (dir) {
-        struct dirent* entry;
-        while ((entry = readdir(dir))) {
-            if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
-                tids.push_back(strtol(entry->d_name, nullptr, 10));
-            }
+std::vector<pid_t> getThreadIDs(pid_t pid, const std::string& threadPattern = "") {
+    std::vector<pid_t> tids;
+    std::regex pattern(threadPattern);
+    std::string taskDir = "/proc/" + std::to_string(pid) + "/task";
+    for (const auto& entry : std::filesystem::directory_iterator(taskDir)) {
+        if (!entry.is_directory()) continue;
+        std::string tidStr = entry.path().filename();
+        if (!std::all_of(tidStr.begin(), tidStr.end(), ::isdigit)) continue;
+        if (!threadPattern.empty()) {
+            std::ifstream commFile(entry.path()/"comm");
+            if (!commFile) continue;
+            std::string comm;
+            std::getline(commFile, comm);
+            if (!std::regex_search(comm, pattern)) continue;
         }
-        closedir(dir);
+        tids.push_back(std::stoi(tidStr));
     }
-
     return tids;
 }
 
-// Function to change task cgroup.
-void changeTaskCgroup(const string& taskName, const string& cgroupName, const string& cgroupType) {
-    vector<pid_t> pids = getProcessIDs(taskName);
-    for (pid_t pid : pids) {
-        vector<pid_t> tids = getThreadIDs(pid);
+// ------------- CORE OPTIMIZATION ACTIONS ------------- //
+
+void setTaskAffinity(const std::string& namePattern, const std::string& hexMask) {
+    for (pid_t pid : getProcessIDs(namePattern)) {
+        for (pid_t tid : getThreadIDs(pid)) {
+            std::string cmd = "taskset -p " + hexMask + " " + std::to_string(tid);
+            executeCommand(cmd, "affinity");
+        }
+    }
+}
+
+void setThreadAffinity(const std::string& namePattern, const std::string& threadPattern, const std::string& hexMask) {
+    for (pid_t pid : getProcessIDs(namePattern)) {
+        for (pid_t tid : getThreadIDs(pid, threadPattern)) {
+            std::string cmd = "taskset -p " + hexMask + " " + std::to_string(tid);
+            executeCommand(cmd, "affinity");
+        }
+    }
+}
+
+void setTaskNice(const std::string& namePattern, int niceVal) {
+    for (pid_t pid : getProcessIDs(namePattern)) {
+        for (pid_t tid : getThreadIDs(pid)) {
+            std::string cmd = "renice -n " + std::to_string(niceVal) + " -p " + std::to_string(tid);
+            executeCommand(cmd, "nice");
+        }
+    }
+}
+
+void setThreadNice(const std::string& namePattern, const std::string& threadPattern, int niceVal) {
+    for (pid_t pid : getProcessIDs(namePattern)) {
+        for (pid_t tid : getThreadIDs(pid, threadPattern)) {
+            std::string cmd = "renice -n " + std::to_string(niceVal) + " -p " + std::to_string(tid);
+            executeCommand(cmd, "nice");
+        }
+    }
+}
+
+void setTaskRt(const std::string& namePattern, int priority) {
+    for (pid_t pid : getProcessIDs(namePattern)) {
+        for (pid_t tid : getThreadIDs(pid)) {
+            std::string cmd = "chrt -p " + std::to_string(priority) + " " + std::to_string(tid);
+            executeCommand(cmd, "rt");
+        }
+    }
+}
+
+void setTaskIoPrio(const std::string& namePattern, int classType, int classLevel) {
+    for (pid_t pid : getProcessIDs(namePattern)) {
+        for (pid_t tid : getThreadIDs(pid)) {
+            std::string cmd = "ionice -c " + std::to_string(classType) + " -n " + std::to_string(classLevel) + " -p " + std::to_string(tid);
+            executeCommand(cmd, "ioprio");
+        }
+    }
+}
+
+void setIrqAffinity(const std::string& irqPattern, const std::string& hexMask) {
+    std::string cmd = "grep -r '" + irqPattern + "' /proc/interrupts | grep -oE '^[0-9]+' | sort -u";
+    std::string irqs = executeCommand(cmd, "irq");
+    std::istringstream iss(irqs);
+    std::string irq;
+    while (std::getline(iss, irq)) {
+        if (!irq.empty()) {
+            std::string setCmd = "echo " + hexMask + " > /proc/irq/" + irq + "/smp_affinity";
+            executeCommand(setCmd, "irq");
+        }
+    }
+}
+
+// Pin only the first thread matching pattern to one mask, use another mask for the rest
+void pinProcOnFirst(const std::string& taskPattern, const std::string& hexMaskPrime, const std::string& hexMaskOthers) {
+    for (pid_t pid : getProcessIDs(taskPattern)) {
+        auto tids = getThreadIDs(pid, taskPattern);
+        bool first = true;
         for (pid_t tid : tids) {
-            string command = "echo " + to_string(tid) + " > /dev/" + cgroupType + "/" + cgroupName + "/tasks";
-            executeCommand(command, "/data/adb/modules/task_optimizer/logs/cgroup.log");
+            std::string mask = first ? hexMaskPrime : hexMaskOthers;
+            std::string cmd = "taskset -p " + mask + " " + std::to_string(tid);
+            executeCommand(cmd, "affinity");
+            first = false;
         }
     }
 }
 
-// Function to change thread cgroup.
-void changeThreadCgroup(const string& taskName, const string& threadName, const string& cgroupName, const string& cgroupType) {
-    vector<pid_t> pids = getProcessIDs(taskName);
-    for (pid_t pid : pids) {
-        vector<pid_t> tids = getThreadIDs(pid);
-        for (pid_t tid : tids) {
-            string command = "cat /proc/" + to_string(pid) + "/task/" + to_string(tid) + "/comm";
-            FILE* pipe = popen(command.c_str(), "r");
-            if (pipe) {
-                char buffer[128];
-                if (fgets(buffer, sizeof(buffer), pipe)) {
-                    string comm(buffer);
-                    if (comm.find(threadName) != string::npos) {
-                        string cgroupCommand = "echo " + to_string(tid) + " > /dev/" + cgroupType + "/" + cgroupName + "/tasks";
-                        executeCommand(cgroupCommand, "/data/adb/modules/task_optimizer/logs/cgroup.log");
-                    }
-                }
-                pclose(pipe);
-            }
-        }
+// ------------- MAIN OPTIMIZATION LOGIC ------------- //
+
+void optimizeLauncher(const std::string& launcherPkg) {
+    setThreadAffinity(launcherPkg, "RenderThread|GLThread", config::RENDERTHREAD_MASK);
+    setThreadAffinity(launcherPkg, "GPU completion|HWC release|hwui|FramePolicy|ScrollPolicy|ged-swd", config::GPUWORKERS_MASK);
+}
+
+void optimizeGraphics() {
+    setIrqAffinity("msm_drm|fts", config::PERFCORE_MASK);
+    setIrqAffinity("kgsl_3d0_irq", config::MIDCORE_MASK);
+    setTaskAffinity("surfaceflinger", config::RENDERTHREAD_MASK);
+    pinProcOnFirst("crtc_event:", config::PERFCORE_MASK, config::GPUWORKERS_MASK);
+    pinProcOnFirst("crtc_commit:", config::PERFCORE_MASK, config::GPUWORKERS_MASK);
+    setTaskAffinity("pp_event", config::PERFCORE_MASK);
+    setTaskAffinity("mdss_fb|mdss_disp_wake|vsync_retire_work|pq@", config::MIDCORE_MASK);
+    setTaskAffinity("fts_wq|nvt_ts_work", config::MIDCORE_MASK);
+    setTaskRt("fts_wq|nvt_ts_work", 50);
+    setTaskAffinity("hyper@", config::MIDCORE_MASK);
+}
+
+void optimizeTasks() {
+    for (const auto& t : config::TASK_NAMES_HIGH_PRIO) setTaskNice(t, -15);
+    for (const auto& t : config::TASK_NAMES_LOW_PRIO) setTaskNice(t, 0);
+
+    for (const auto& t : config::TASK_NAMES_RT_FF) {
+        setTaskNice(t, -15);
+        setTaskAffinity(t, config::GENERAL_MASK);
+        setTaskRt(t, 50);
     }
+    for (const auto& t : config::TASK_NAMES_RT_IDLE) setTaskRt(t, 0);
+    for (const auto& t : config::TASK_NAMES_IO_PRIO) setTaskIoPrio(t, 3, 0);
+    setTaskNice("thread_fence", -15);
+
+    setTaskRt("kgsl_worker_thread|crtc_commit|crtc_event|pp_event", 16);
+    setTaskRt("rot_commitq_|rot_doneq_|rot_fenceq_", 5);
+    setTaskRt("system_server|surfaceflinger|composer", 2);
 }
 
-// Function to change thread affinity.
-void changeThreadAffinity(const string& taskName, const string& threadName, const string& hexMask) {
-    vector<pid_t> pids = getProcessIDs(taskName);
-    for (pid_t pid : pids) {
-        vector<pid_t> tids = getThreadIDs(pid);
-        for (pid_t tid : tids) {
-            string command = "cat /proc/" + to_string(pid) + "/task/" + to_string(tid) + "/comm";
-            FILE* pipe = popen(command.c_str(), "r");
-            if (pipe) {
-                char buffer[128];
-                if (fgets(buffer, sizeof(buffer), pipe)) {
-                    string comm(buffer);
-                    if (comm.find(threadName) != string::npos) {
-                        string affinityCommand = "taskset -p " + hexMask + " " + to_string(tid);
-                        executeCommand(affinityCommand, "/data/adb/modules/task_optimizer/logs/affinity.log");
-                    }
-                }
-                pclose(pipe);
-            }
-        }
-    }
-}
-
-// Function to change task affinity.
-void changeTaskAffinity(const string& taskName, const string& hexMask) {
-    vector<pid_t> pids = getProcessIDs(taskName);
-    for (pid_t pid : pids) {
-        vector<pid_t> tids = getThreadIDs(pid);
-        for (pid_t tid : tids) {
-            string affinityCommand = "taskset -p " + hexMask + " " + to_string(tid);
-            executeCommand(affinityCommand, "/data/adb/modules/task_optimizer/logs/affinity.log");
-        }
-    }
-}
-
-// Function to change task nice value.
-void changeTaskNice(const string& taskName, int niceVal) {
-    vector<pid_t> pids = getProcessIDs(taskName);
-    for (pid_t pid : pids) {
-        vector<pid_t> tids = getThreadIDs(pid);
-        for (pid_t tid : tids) {
-            string niceCommand = "renice -n " + to_string(niceVal) + " -p " + to_string(tid);
-            executeCommand(niceCommand, "/data/adb/modules/task_optimizer/logs/nice.log");
-        }
-    }
-}
-
-// Function to change thread nice value.
-void changeThreadNice(const string& taskName, const string& threadName, int niceVal) {
-    vector<pid_t> pids = getProcessIDs(taskName);
-    for (pid_t pid : pids) {
-        vector<pid_t> tids = getThreadIDs(pid);
-        for (pid_t tid : tids) {
-            string command = "cat /proc/" + to_string(pid) + "/task/" + to_string(tid) + "/comm";
-            FILE* pipe = popen(command.c_str(), "r");
-            if (pipe) {
-                char buffer[128];
-                if (fgets(buffer, sizeof(buffer), pipe)) {
-                    string comm(buffer);
-                    if (comm.find(threadName) != string::npos) {
-                        string niceCommand = "renice -n " + to_string(niceVal) + " -p " + to_string(tid);
-                        executeCommand(niceCommand, "/data/adb/modules/task_optimizer/logs/nice.log");
-                    }
-                }
-                pclose(pipe);
-            }
-        }
-    }
-}
-
-// Function to change task real-time priority.
-void changeTaskRt(const string& taskName, int priority) {
-    vector<pid_t> pids = getProcessIDs(taskName);
-    for (pid_t pid : pids) {
-        vector<pid_t> tids = getThreadIDs(pid);
-        for (pid_t tid : tids) {
-            string rtCommand = "chrt -p " + to_string(priority) + " " + to_string(tid);
-            executeCommand(rtCommand, "/data/adb/modules/task_optimizer/logs/rt.log");
-        }
-    }
-}
-
-// Function to change task I/O priority.
-void changeTaskIoPrio(const string& taskName, int classType, int classLevel) {
-    vector<pid_t> pids = getProcessIDs(taskName);
-    for (pid_t pid : pids) {
-        vector<pid_t> tids = getThreadIDs(pid);
-        for (pid_t tid : tids) {
-            string ioCommand = "ionice -c " + to_string(classType) + " -n " + to_string(classLevel) + " -p " + to_string(tid);
-            executeCommand(ioCommand, "/data/adb/modules/task_optimizer/logs/ioprio.log");
-        }
-    }
-}
-
-// Function to change IRQ affinity.
-void changeIrqAffinity(const string& taskName, const string& hexMask) {
-    string command = "grep -r '" + taskName + "' /proc/interrupts | grep -oE '^\\\\[[:digit:]]\\\\+' | sort -u";
-    FILE* pipe = popen(command.c_str(), "r");
-    if (pipe) {
-        char buffer[128];
-        while (fgets(buffer, sizeof(buffer), pipe)) {
-            string irq(buffer);
-            irq.erase(remove(irq.begin(), irq.end(), '\n'), irq.end());
-            string affinityCommand = "echo " + hexMask + " > /proc/irq/" + irq + "/smp_affinity";
-            executeCommand(affinityCommand, "/data/adb/modules/task_optimizer/logs/irqaffinity.log");
-        }
-        pclose(pipe);
-    }
-}
-
-// Function to unpin thread from CPU affinity.
-void unpinThread(const string& taskName, const string& threadName) {
-    changeThreadCgroup(taskName, threadName, "", "cpuset");
-}
-
-// Function to unpin process from CPU affinity.
-void unpinProc(const string& taskName) {
-    changeTaskCgroup(taskName, "", "cpuset");
-}
-
-// Function to pin thread on specific CPUs.
-void pinThreadOnCpus(const string& taskName, const string& threadName, const string& cpus) {
-    unpinThread(taskName, threadName);
-    changeThreadAffinity(taskName, threadName, cpus);
-}
-
-// Function to pin process on specific CPUs.
-void pinProcOnCpus(const string& taskName, const string& cpus) {
-    unpinProc(taskName);
-    changeTaskAffinity(taskName, cpus);
-}
-
-// Function to pin only the first threads matching the patternnn.
-void pinProcOnFirst(const string& taskPattern, const string& hexMaskPrime, const string& hexMaskOthers) {
-    vector<pid_t> pids = getProcessIDs(taskPattern);
-    for (pid_t pid : pids) {
-        bool firstThreadPinned = false;
-        vector<pid_t> tids = getThreadIDs(pid);
-        for (pid_t tid : tids) {
-            string command = "cat /proc/" + to_string(pid) + "/task/" + to_string(tid) + "/comm";
-            FILE* pipe = popen(command.c_str(), "r");
-            if (pipe) {
-                char buffer[128];
-                if (fgets(buffer, sizeof(buffer), pipe)) {
-                    string comm(buffer);
-                    if (regex_search(comm, regex(taskPattern))) {
-                        if (!firstThreadPinned) {
-                            string affinityCommand = "taskset -p " + hexMaskPrime + " " + to_string(tid);
-                            executeCommand(affinityCommand, "/data/adb/modules/task_optimizer/logs/affinity.log");
-                            firstThreadPinned = true;
-                        } else {
-                            string affinityCommand = "taskset -p " + hexMaskOthers + " " + to_string(tid);
-                            executeCommand(affinityCommand, "/data/adb/modules/task_optimizer/logs/affinity.log");
-                        }
-                    }
-                }
-                pclose(pipe);
-            }
-        }
-    }
-}
-
-// Function to change task priority to RT, with a specific nice value.
-void changeTaskRtFf(const string& taskName, int niceVal) {
-    vector<pid_t> pids = getProcessIDs(taskName);
-    for (pid_t pid : pids) {
-        vector<pid_t> tids = getThreadIDs(pid);
-        for (pid_t tid : tids) {
-            string rtCommand = "chrt -p -f " + to_string(niceVal) + " " + to_string(tid);
-            executeCommand(rtCommand, "/data/adb/modules/task_optimizer/logs/rt.log");
-        }
-    }
-}
-
-// Function to change task priority to high.
-void changeTaskHighPrio(const string& taskName) {
-    changeTaskNice(taskName, -15);
-}
-
-// Function to change task priority to RT, with idle priority.
-void changeTaskRtIdle(const string& taskName) {
-    changeTaskRt(taskName, 0);
-}
+// ------------- MAIN ENTRY POINT ------------- //
 
 int main() {
     try {
-        // Create log directory
-        filesystem::create_directories("/data/adb/modules/task_optimizer/logs/");
-        ofstream logFile("/data/adb/modules/task_optimizer/logs/task-optimizer-main.log", ios::app);
-        logFile << "" << endl;
-        logFile << "Core optimization started..." << endl;
-        
-        // Set intent action and category
-        string INTENT_ACTION = "android.intent.action.MAIN";
-        string INTENT_CATEGORY = "android.intent.category.HOME";
+        std::filesystem::create_directories(config::LOG_DIR);
+        logMessage("Core optimization started...", config::LOG_FILES.at("main"));
 
-        // Get launcher package name
-        string command = "pm resolve-activity -a \"" + INTENT_ACTION + "\" -c \"" + INTENT_CATEGORY + "\" | grep packageName | head -1 | cut -d= -f2";
-        string LAUNCHER_PACKAGE = executeCommand(command, LAUNCHER_LOG);
-        LAUNCHER_PACKAGE = LAUNCHER_PACKAGE.substr(0, LAUNCHER_PACKAGE.find('\n'));
-
-        // HIGH definitions.
-        vector<string> TASK_NAMES_HIGH_PRIO = {
-            "servicemanag", "zygote", "writeback", "kblockd", "rcu_tasks_kthre", "ufs_clk_gating",
-            "mmc_clk_gate", "system", "kverityd", "speedup_resume_wq", "load_tp_fw_wq", "tcm_freq_hop",
-            "touch_delta_wq", "tp_async", "wakeup_clk_wq", "thread_fence", "Input"
-        };
-
-        // LOW Task definitions.
-        vector<string> TASK_NAMES_LOW_PRIO = {"ipawq", "iparepwq", "wlan_logging_th"};
-
-        vector<string> TASK_NAMES_RT_FF = {
-            "kgsl_worker_thread", "devfreq_boost", "mali_jd_thread", "mali_event_thread", "crtc_commit",
-            "crtc_event", "pp_event", "rot_commitq_", "rot_doneq_", "rot_fenceq_", "system_server",
-            "surfaceflinger", "composer", "fts_wq", "nvt_ts_work"
-        };
-
-        vector<string> TASK_NAMES_RT_IDLE = {"f2fs_gc"};
-        vector<string> TASK_NAMES_IO_PRIO = {"f2fs_gc"};
-
-        // High priority tasks.
-        for (const string& taskName : TASK_NAMES_HIGH_PRIO) {
-            changeTaskHighPrio(taskName);
+        // Get launcher package name dynamically
+        const std::string INTENT_ACTION = "android.intent.action.MAIN";
+        const std::string INTENT_CATEGORY = "android.intent.category.HOME";
+        std::string cmd = "pm resolve-activity -a \"" + INTENT_ACTION + "\" -c \"" + INTENT_CATEGORY + "\" | grep packageName | head -1 | cut -d= -f2";
+        std::string launcherPkg = executeCommand(cmd, "launcher");
+        launcherPkg = launcherPkg.substr(0, launcherPkg.find('\n'));
+        if (launcherPkg.empty()) {
+            logMessage("Launcher package not found, skipping launcher optimizations.", config::LOG_FILES.at("main"));
+        } else {
+            optimizeLauncher(launcherPkg);
         }
 
-        // Low priority tasks.
-        for (const string& taskName : TASK_NAMES_LOW_PRIO) {
-            changeTaskNice(taskName, 0);
-        }
+        optimizeGraphics();
+        optimizeTasks();
 
-        // Render thread
-        pinThreadOnCpus(LAUNCHER_PACKAGE, "RenderThread|GLThread", "ff");
-        pinThreadOnCpus(LAUNCHER_PACKAGE, "GPU completion|HWC release|hwui|FramePolicy|ScrollPolicy|ged-swd", "0f");
-
-
-        // Graphics workers are prioritized to run on perf cores
-        changeIrqAffinity("msm_drm|fts", "80");
-        changeIrqAffinity("kgsl_3d0_irq", "70");
-
-        for (const string& taskName : TASK_NAMES_RT_FF) {
-            changeTaskHighPrio(taskName);
-            pinProcOnCpus(taskName, "f0");
-            changeTaskRt(taskName, 50);
-        }
-
-        // SF should have all cores
-        pinProcOnCpus("surfaceflinger", "ff");
-
-        // Render threads
-        // Pin only the first threads to prime, others are non-critical
-        pinProcOnFirst("crtc_event:", "80", "0f");
-        pinProcOnFirst("crtc_commit:", "80", "0f");
-        pinProcOnCpus("pp_event", "80");
-        pinProcOnCpus("mdss_fb|mdss_disp_wake|vsync_retire_work|pq@", "70");
-
-        // TS workqueues on perf cluster to reduce latency
-        pinProcOnCpus("fts_wq|nvt_ts_work", "70");
-        changeTaskRtFf("fts_wq|nvt_ts_work", 50);
-
-        // Samsung HyperHAL to perf cluster
-        pinProcOnCpus("hyper@", "70");
-
-        // CVP fence request handler
-        changeTaskHighPrio("thread_fence");
-
-        // RT priority adequately for critical tasks
-        changeTaskRtFf("kgsl_worker_thread|crtc_commit|crtc_event|pp_event", 16);
-        changeTaskRtFf("rot_commitq_|rot_doneq_|rot_fenceq_", 5);
-        changeTaskRtFf("system_server|surfaceflinger|composer", 2);
-
-        // GC should run conservatively as possible to reduce latency spikes
-        for (const string& taskName : TASK_NAMES_RT_IDLE) {
-            changeTaskRtIdle(taskName);
-        }
-
-        for (const string& taskName : TASK_NAMES_IO_PRIO) {
-            changeTaskIoPrio(taskName, 3, 0);
-        }
-
-        logFile << "" << endl;
-        logFile << "Task Optimization executed successfully!" << endl;
-        logFile.close();
-
-    } catch (const exception& e) {
-        ofstream errorLog("/data/adb/modules/task_optimizer/logs/error.log", ios::app);
-        errorLog << "Exxception occurred: " << e.what() << endl;
-        errorLog.close();
+        logMessage("Task Optimization executed successfully!", config::LOG_FILES.at("main"));
+    } catch (const std::exception& e) {
+        logMessage(std::string("Exception occurred: ") + e.what(), config::LOG_FILES.at("error"));
         return 1;
     }
-
     return 0;
 }
