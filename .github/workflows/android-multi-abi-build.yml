@@ -1,4 +1,4 @@
-name: Android Multi ABI Build
+name: Android Universal ABI Build
 
 on:
   push:
@@ -25,7 +25,6 @@ jobs:
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
           unzip -q android-ndk-r26d-linux.zip
-          echo "$ANDROID_NDK_HOME" >> $GITHUB_PATH
 
       - name: Set up build directory
         run: |
@@ -47,7 +46,6 @@ jobs:
 
       - name: Find and copy binary to libs/${{ matrix.abi }}
         run: |
-          # Find built binary, copy it to the correct libs directory
           BIN=$(find build/${{ matrix.abi }} -type f -executable -name "core_task_optimizer*" | head -n1)
           if [ -z "$BIN" ]; then
             echo "No binary found for ${{ matrix.abi }}"
@@ -55,8 +53,8 @@ jobs:
           fi
           cp "$BIN" "libs/${{ matrix.abi }}/task_optimizer"
 
-      - name: Upload built universal binaries (all ABIs)
+      - name: Upload built binary for ${{ matrix.abi }}
         uses: actions/upload-artifact@v4
         with:
-          name: universal-libs
-          path: libs/
+          name: libs-${{ matrix.abi }}
+          path: libs/${{ matrix.abi }}/
