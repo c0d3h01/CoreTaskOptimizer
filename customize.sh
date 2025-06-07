@@ -1,18 +1,6 @@
 # MMT Extended Config Script.
-#
-# Config Flags.
-#
-# Replace list
-REPLACE_EXAMPLE="
-/system/app/Youtube
-/system/priv-app/SystemUI
-/system/priv-app/Settings
-/system/framework
-"
-
 # Construct your own list here
-REPLACE="
-"
+# REPLACE=""
 
 # Permissions
 set_permissions() {
