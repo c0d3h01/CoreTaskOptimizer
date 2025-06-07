@@ -1,0 +1,39 @@
+# CMake build folders
+build/
+CMakeFiles/
+cmake-build-*/
+CMakeScripts/
+
+# CMake generated files
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+install_manifest.txt
+
+# Compiled binaries and object files
+*.o
+*.obj
+*.so
+*.dll
+*.exe
+*.a
+*.lib
+
+# CLion/JetBrains IDE CMake output
+cmake-build-*/
+
+# VSCode
+.vscode/
+
+# Other build artifacts
+.libs/
+.libs*/
+*.user
+*.swp
+*.swo
+
+# Mac OS
+.DS_Store
+
+# Logs
+logs/
