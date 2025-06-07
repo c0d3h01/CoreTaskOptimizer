@@ -1,5 +1,8 @@
 # CoreTaskOptimizer
 
+[![Magisk Module CI](https://github.com/c0d3h01/CoreTaskOptimizer/actions/workflows/checks.yml/badge.svg)](https://github.com/c0d3h01/CoreTaskOptimizer/actions/workflows/checks.yml)
+[![Multi ABI Build (on main.cpp changes)](https://github.com/c0d3h01/CoreTaskOptimizer/actions/workflows/android-multi-abi-build.yml/badge.svg)](https://github.com/c0d3h01/CoreTaskOptimizer/actions/workflows/android-multi-abi-build.yml)
+
 Adaptive core CPU optimizer for Android, designed for use as a [Magisk](https://github.com/topjohnwu/Magisk) module.  
 This project provides a universal, cross-architecture binary for efficient task management, core affinity, and log management on rooted Android devices.
 
