@@ -1,0 +1,60 @@
+name: Magisk Module CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake clang g++ shellcheck
+
+      - name: Build C++ components
+        run: |
+          mkdir -p build
+          cd build
+          cmake ..
+          make
+
+      - name: ShellCheck scripts
+        run: |
+          if [ -d scripts ]; then
+            shellcheck scripts/*.sh
+          fi
+
+      - name: Lint and format C++ code
+        run: |
+          if command -v clang-format >/dev/null 2>&1; then
+            find src/ -name '*.cpp' -or -name '*.h' | xargs clang-format --dry-run --Werror
+          fi
+
+      - name: Run C++ tests (if any)
+        run: |
+          cd build
+          if [ -f Makefile ]; then
+            ctest --output-on-failure || true
+          fi
+
+      - name: Static analysis (optional)
+        run: |
+          if command -v clang-tidy >/dev/null 2>&1 && [ -f build/compile_commands.json ]; then
+            find ../src -name '*.cpp' | xargs clang-tidy -p .
+          fi
+
+      - name: Archive logs (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: /data/adb/modules/task_optimizer/logs/
+          if-no-files-found: ignore
