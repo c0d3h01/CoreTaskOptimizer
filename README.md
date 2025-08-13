@@ -1,109 +1,69 @@
-# CoreTaskOptimizer
+# Task Optimizer – Magisk Module
 
-[![Magisk Module CI](https://github.com/c0d3h01/CoreTaskOptimizer/actions/workflows/checks.yml/badge.svg)](https://github.com/c0d3h01/CoreTaskOptimizer/actions/workflows/checks.yml)
-[![Multi ABI Build (on main.cpp changes)](https://github.com/c0d3h01/CoreTaskOptimizer/actions/workflows/android-multi-abi-build.yml/badge.svg)](https://github.com/c0d3h01/CoreTaskOptimizer/actions/workflows/android-multi-abi-build.yml)
-
-Adaptive core CPU optimizer for Android, designed for use as a [Magisk](https://github.com/topjohnwu/Magisk) module.  
-This project provides a universal, cross-architecture binary for efficient task management, core affinity, and log management on rooted Android devices.
+**Boost system responsiveness, improve gaming performance, and smooth out UI interactions — automatically.**
+Task Optimizer intelligently adjusts CPU affinity, priority, and I/O scheduling for critical Android system processes.
 
 ---
 
 ## Features
 
-- **Universal ABI Support**: Automatically builds for `arm64-v8a`, `armeabi-v7a`, `x86`, and `x86_64` (Android NDK supported).
-- **Magisk Module Ready**: Place binaries in the `libs/$ABI/task_optimizer` path for direct use in Magisk modules.
-- **CMake-based Build**: Simple and portable build process for Android and Linux environments.
-- **Automatic CI/CD**: GitHub Actions workflow automatically rebuilds and deploys binaries on changes to `src/main.cpp`.
-- **Customizable Service**: Comes with service scripts and configuration files for advanced users.
+* **High-priority tuning** for essential Android services (`system_server`, `zygote`, `surfaceflinger`, etc.)
+* **Real-time performance boost** for graphics and touch input threads
+* **Background process throttling** to free up resources for active tasks
+* **Launcher optimization** for smoother home screen animations
+* **Touch & display IRQ tuning** for faster input response
+* **Automatic logging** for transparency and troubleshooting
 
 ---
 
-## Directory Structure
+## Installation
 
-```
-.
-├── .github/           # GitHub Actions workflows
-├── common/            # Common headers/scripts (if any)
-├── libs/              # Output: ABI-specific binaries (e.g., libs/arm64-v8a/task_optimizer)
-├── src/               # Source code (main.cpp, etc.)
-├── CMakeLists.txt     # CMake build script
-├── build.sh           # Optional build helper script
-├── customize.sh       # Customization script
-├── service.sh         # Service starter script
-├── uninstall.sh       # Uninstall helper script
-├── module.prop        # Magisk module property file
-├── LICENSE            # License file (MIT)
-└── README.md
-```
+1. Download the latest release ZIP.
+2. Open **Magisk Manager**.
+3. Tap **Modules** → **Install from storage**.
+4. Select the downloaded ZIP and install.
+5. Reboot your device.
 
 ---
 
-## Building
+## How It Works
 
-### Prerequisites
+* Detects running processes and threads using `/proc`
+* Matches them against a curated list of **high**, **real-time**, and **low priority** patterns
+* Applies:
 
-- [Android NDK](https://developer.android.com/ndk/downloads)
-- [CMake](https://cmake.org/download/)
-- A POSIX-compatible shell (Linux/macOS/WSL)
+  * **CPU affinity masks** (performance vs. efficiency cores)
+  * **Nice values** (process scheduling priority)
+  * **Real-time scheduling** for critical rendering/touch threads
+  * **I/O scheduling classes** for background tasks
+* Logs all actions to:
 
-### Build Manually
-
-```sh
-# For a specific ABI:
-ABI=arm64-v8a
-mkdir -p build/$ABI
-cd build/$ABI
-cmake -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
-      -DANDROID_ABI=$ABI \
-      -DANDROID_PLATFORM=android-21 \
-      ../..
-cmake --build .
-cd ../..
-# Output: libs/$ABI/task_optimizer
-```
-
-Or use the provided workflow/build scripts to automate all ABIs.
+    * `/data/adb/modules/task_optimizer/logs/main.log`
+    * `/data/adb/modules/task_optimizer/logs/error.log`
 
 ---
 
-## Continuous Integration
+## Requirements
 
-- **GitHub Actions**:  
-  On changes to `src/main.cpp`, the workflow will:
-  1. Build for all ABIs.
-  2. Copy binaries to `libs/$ABI/task_optimizer`.
-  3. Upload `libs/` as an artifact for easy download.
+* Root access via **Magisk**
+* Android 8.0+ recommended
+* BusyBox - No need (Magisk has its inbuilt)
 
 ---
 
-## Usage in Magisk Module
+> [!CAUTION]    
+> I am not responsible for any kind damage of software or hardware      
+> Use at your own risk!     
 
-Copy the ABI-specific binaries from `libs/` into your Magisk module under the appropriate path (e.g. `system/bin` or similar as required by your module).
+---
 
-Example:
-```
-libs/arm64-v8a/task_optimizer       # For 64-bit ARM
-libs/armeabi-v7a/task_optimizer    # For 32-bit ARM
-libs/x86/task_optimizer            # For x86
-libs/x86_64/task_optimizer         # For x86_64
-```
+> [!NOTE]      
+> All changes are **temporary** — they reset after reboot unless the module runs again.     
+> Safe to uninstall from Magisk at any time.        
+> May have no effect on heavily customized vendor kernels that override CPU settings.       
 
 ---
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
-
----
-
-## Contributing
-
-Pull requests and issues are welcome!  
-Please use [issues](https://github.com/c0d3h01/CoreTaskOptimizer/issues) for bug reports or feature requests.
-
----
-
-## Author
-
-**Harshal Sawant**  
-[GitHub](https://github.com/c0d3h01) | [Buy me a coffee](https://www.buymeacoffee.com/c0d3h01)
+**This project is licensed under the** [MIT License](LICENSE)
