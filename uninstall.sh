@@ -1,3 +1,5 @@
+#!/system/bin/sh
+
 # Don't modify anything after this
 if [ -f $INFO ]; then
   while read LINE; do
