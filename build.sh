@@ -36,7 +36,7 @@ build_abi() {
         ../..
     
     echo "[*] Building..."
-    cmake --build . -j$(nproc 2>/dev/null || echo 4)
+    cmake --build . -j"$(nproc 2>/dev/null || echo 4)"
     
     # Create bin directory structure instead of libs
     mkdir -p "../../bin/$ABI"
