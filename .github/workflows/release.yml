@@ -1,0 +1,29 @@
+name: Release PR with Binaries
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Test Optimizer Binaries"]
+    types: [completed]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: optimizer-binaries
+          path: bin
+      - run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b binaries/${{ github.run_id }}
+          mkdir -p dist && cp -r bin dist/
+          git add dist && git commit -m "Add binaries ${{ github.run_id }}"
+          git push origin binaries/${{ github.run_id }}
+      - uses: peter-evans/create-pull-request@v6
+        with:
+          title: "Binaries build ${{ github.run_id }}"
+          base: main
+          branch: binaries/${{ github.run_id }}
