@@ -1,4 +1,6 @@
 #!/system/bin/sh
+
+# Module root dir
 MODDIR="${0%/*}"
 
 wait_until_login() {
@@ -7,7 +9,9 @@ wait_until_login() {
   done
 }
 wait_until_login
+sleep 30
 
-sleep 30 && mkdir -p "$MODPATH/logs" &&
-"$MODDIR/libs/task_optimizer" 2>/dev/null
+mkdir -p "$MODPATH/logs" &&
+"$MODDIR/bin/task_optimizer" 2>/dev/null
+
 exit 0
