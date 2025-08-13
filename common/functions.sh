@@ -1,3 +1,5 @@
+#!/system/bin/sh
+
 ##########################################################################################
 #
 # MMT Extended Utility Functions
@@ -5,32 +7,52 @@
 ##########################################################################################
 
 setup_native_libs() {
+    # Validate required variables
+    if [ -z "$ARCH" ] || [ -z "$MODPATH" ]; then
+        ui_print "[!] ARCH or MODPATH not set. Cannot proceed with native libs setup."
+        return 1
+    fi
+
+    local src_dir dest_dir="$MODPATH/bin"
+    local arch_dir
+
     case "$ARCH" in
-    arm)
-        mv -f "$MODPATH"/libs/armeabi_v7a/* "$MODPATH/libs"
-        rm -rf "$MODPATH/libs/armeabi_v7a" "$MODPATH/libs/arm64_v8a" "$MODPATH/libs/x86" "$MODPATH/libs/x86_64"
-        mv -f "$MODPATH/libs/task_optimizer_arm" "$MODPATH/libs/task_optimizer"
-        ;;
-
-    arm64)
-        mv -f "$MODPATH"/libs/arm64_v8a/* "$MODPATH/libs"
-        rm -rf "$MODPATH/libs/arm64_v8a" "$MODPATH/libs/armeabi_v7a" "$MODPATH/libs/x86" "$MODPATH/libs/x86_64"
-        mv -f "$MODPATH/libs/task_optimizer_arm64" "$MODPATH/libs/task_optimizer"
-        ;;
-
-    x86)
-        mv -f "$MODPATH"/libs/x86/* "$MODPATH/libs"
-        rm -rf "$MODPATH/libs/x86" "$MODPATH/libs/armeabi_v7a" "$MODPATH/libs/arm64_v8a" "$MODPATH/libs/x86_64"
-        mv -f "$MODPATH/libs/task_optimizer_x86" "$MODPATH/libs/task_optimizer"
-        ;;
-
-    x64)
-        mv -f "$MODPATH"/libs/x86_64/* "$MODPATH/libs"
-        rm -rf "$MODPATH/libs/x86_64" "$MODPATH/libs/armeabi_v7a" "$MODPATH/libs/x86" "$MODPATH/libs/arm64_v8a"
-        mv -f "$MODPATH/libs/task_optimizer_x86_64" "$MODPATH/libs/task_optimizer"
-        ;;
-
+        arm)   arch_dir="armeabi-v7a" ;;
+        arm64) arch_dir="arm64-v8a" ;;
+        x86)   arch_dir="x86" ;;
+        x64)   arch_dir="x86_64" ;;
+        *)
+            ui_print "[!] Unsupported architecture: $ARCH"
+            return 1
+            ;;
     esac
+
+    src_dir="$MODPATH/bin/$arch_dir"
+
+    # Check if source dir exists
+    if [ ! -d "$src_dir" ]; then
+        ui_print "[!] Missing source directory: $src_dir"
+        return 1
+    fi
+
+    # Move files
+    if ! mv -f "$src_dir"/* "$dest_dir"/ 2>/dev/null; then
+        ui_print "[!] Failed to move files from $src_dir to $dest_dir"
+        return 1
+    fi
+
+    # Remove all arch subdirs to avoid leftover files
+    if ! rm -rf \
+        "$MODPATH/bin/armeabi-v7a" \
+        "$MODPATH/bin/arm64-v8a" \
+        "$MODPATH/bin/x86" \
+        "$MODPATH/bin/x86_64" 2>/dev/null; then
+        ui_print "[!] Failed to clean up old architecture directories"
+        return 1
+    fi
+
+    ui_print "[*] Native libraries setup complete for architecture: $ARCH"
+    return 0
 }
 
 require_new_ksu() {
@@ -211,7 +233,7 @@ mount_mirrors() {
 # Credits
 ui_print "**************************************"
 ui_print "*   MMT Extended by Zackptg5 @ XDA   *"
-ui_print "*   Modified by c0d3h01 @GitHub      *"
+ui_print "*   Modified by c0d3h01 @ GitHub      *"
 ui_print "**************************************"
 ui_print " "
 
@@ -318,9 +340,12 @@ if [ -f $INFO ]; then
     rm -f $INFO
 fi
 
-### Install
-ui_print "- Installing"
+# Installation
+ui_print " - Installing"
+
+# module bin setup
 setup_native_libs
+
 [ -f "$MODPATH/common/install.sh" ] && . $MODPATH/common/install.sh
 
 ui_print "   Installing for $ARCH SDK $API device..."
