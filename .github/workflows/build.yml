@@ -21,10 +21,9 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build unzip curl
 
       - run: |
-          mkdir -p "$ANDROID_HOME"
+          mkdir -p "$ANDROID_HOME/cmdline-tools/latest"
           curl -fo sdk.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -q sdk.zip -d "$ANDROID_HOME/cmdline-tools"
-          mv "$ANDROID_HOME/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          unzip -q sdk.zip -d "$ANDROID_HOME/cmdline-tools/latest"
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" \
             "platform-tools" "platforms;android-21" "build-tools;34.0.0" "ndk;26.2.11394342"
           ln -s "$ANDROID_HOME/ndk/26.2.11394342" "$ANDROID_NDK"
