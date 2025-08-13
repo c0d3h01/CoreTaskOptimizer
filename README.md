@@ -3,6 +3,8 @@
 **Boost system responsiveness, improve gaming performance, and smooth out UI interactions — automatically.**
 Task Optimizer intelligently adjusts CPU affinity, priority, and I/O scheduling for critical Android system processes.
 
+[![Android Build Test](https://github.com/c0d3h01/CoreTaskOptimizer/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/c0d3h01/CoreTaskOptimizer/actions/workflows/checks.yml)
+
 ---
 
 ## Features
