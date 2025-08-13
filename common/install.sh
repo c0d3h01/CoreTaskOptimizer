@@ -1,7 +1,10 @@
 #!/system/bin/sh
+
+# Installer UI prints on module
+
 ui_print ""
 ui_print "[*] Core Task Optimizer"
-ui_print "[*] Version: v1.1.7 (versionCode: 202531)"
+ui_print "[*] Version: v2.1.3 (versionCode: 201530)"
 ui_print "[*] Author: c0d3h01 (@github)"
 ui_print "[*] Architecture: armeabi_v7a, arm64_v8a, x86, x86_64"
 ui_print ""
