@@ -1,11 +1,9 @@
 #!/system/bin/sh
 
-# MMT Extended Config Script.
-
 # Permissions
 set_permissions() {
-    set_perm_recursive "$MODPATH" 0 0 0755 0644
-    set_perm_recursive "$MODPATH/libs" 0 0 0755 0755
+  set_perm_recursive "$MODPATH" 0 0 0755 0644
+  set_perm_recursive "$MODPATH/bin" 0 0 0755 0755
 }
 
 SKIPUNZIP=1
