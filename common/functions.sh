@@ -73,7 +73,20 @@ umount_mirrors() {
 
 cleanup() {
     if $KSU || [ $MAGISK_VER_CODE -ge 27000 ]; then umount_mirrors; fi
-    rm -rf "$MODPATH/common" "$MODPATH/changelog.md" "$MODPATH/LICENSE" "$MODPATH/logs" "$MODPATH/update.json" "$MODPATH/libs/SRC" 2>/dev/null
+    rm -rf "$MODPATH/.github" \
+           "$MODPATH/common" \
+           "$MODPATH/src" \
+           "$MODPATH/.envrc" \
+           "$MODPATH/.gitignore" \
+           "$MODPATH/build.sh" \
+           "$MODPATH/CMakeLists.txt" \
+           "$MODPATH/devenv.lock" \
+           "$MODPATH/devenv.nix" \
+           "$MODPATH/devenv.yaml" \
+           "$MODPATH/LICENSE" \
+           "$MODPATH/README.md" \
+           "$MODPATH/update.json" \
+           2>/dev/null
 }
 
 abort() {
@@ -233,9 +246,9 @@ mount_mirrors() {
 # Credits
 ui_print "**************************************"
 ui_print "*   MMT Extended by Zackptg5 @ XDA   *"
-ui_print "*   Modified by c0d3h01 @ GitHub      *"
+ui_print "*   Modified by c0d3h01 @ GitHub     *"
 ui_print "**************************************"
-ui_print " "
+ui_print ""
 
 # Check for min/max api version
 [ -z $MINAPI ] || { [ $API -lt $MINAPI ] && abort "! Your system API of $API is less than the minimum api of $MINAPI! Aborting!"; }
@@ -244,6 +257,7 @@ ui_print " "
 # Min KSU v0.6.6
 [ -z $KSU ] && KSU=false
 $KSU && { [ $KSU_VER_CODE -lt 11184 ] && require_new_ksu; }
+
 # APatch is fork of KSU, treat same
 [ -z $APATCH ] && APATCH=false
 [ "$APATCH" == "true" ] && KSU=true
@@ -321,34 +335,19 @@ if [ "$(ls -A $MODPATH/common/addon/*/install.sh 2>/dev/null)" ]; then
 fi
 
 # Remove files outside of module directory
-ui_print "- Removing old files"
-
-if [ -f $INFO ]; then
-    while read LINE; do
-        if [ "$(echo -n $LINE | tail -c 1)" == "~" ]; then
-            continue
-        elif [ -f "$LINE~" ]; then
-            mv -f $LINE~ $LINE
-        else
-            rm -f $LINE
-            while true; do
-                LINE=$(dirname $LINE)
-                [ "$(ls -A $LINE 2>/dev/null)" ] && break 1 || rm -rf $LINE
-            done
-        fi
-    done <$INFO
-    rm -f $INFO
-fi
+ui_print ""
+ui_print "[*] Removing old files"
+. $MODPATH/uninstall.sh
 
 # Installation
-ui_print " - Installing"
+ui_print ""
+ui_print " [*] Installing"
 
-# module bin setup
+# soucre setup
 setup_native_libs
 
 [ -f "$MODPATH/common/install.sh" ] && . $MODPATH/common/install.sh
-
-ui_print "   Installing for $ARCH SDK $API device..."
+ui_print " Installing for $ARCH SDK $API device..."
 # Remove comments from files and place them, add blank line to end if not already present
 for i in $(find $MODPATH -type f -name "*.sh" -o -name "*.prop" -o -name "*.rule"); do
     [ -f $i ] && {
@@ -391,8 +390,10 @@ fi
 
 # Set permissions
 ui_print " "
-ui_print "- Setting Permissions"
+ui_print "[*] Setting Permissions"
+
 set_perm_recursive $MODPATH 0 0 0755 0644
+
 for i in /system/vendor /vendor /system/vendor/app /vendor/app /system/vendor/etc /vendor/etc /system/odm/etc /odm/etc /system/vendor/odm/etc /vendor/odm/etc /system/vendor/overlay /vendor/overlay; do
     if [ -d "$MODPATH$i" ] && [ ! -L "$MODPATH$i" ]; then
         case $i in
@@ -403,10 +404,12 @@ for i in /system/vendor /vendor /system/vendor/app /vendor/app /system/vendor/et
         esac
     fi
 done
+
 for i in $(find $MODPATH/system/vendor $MODPATH/vendor -type f -name *".apk" 2>/dev/null); do
     chcon u:object_r:vendor_app_file:s0 $i
 done
+
 set_permissions
 
-# Complete install
+# Clean unneeded files
 cleanup
