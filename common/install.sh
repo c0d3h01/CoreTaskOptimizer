@@ -1,7 +1,5 @@
 #!/system/bin/sh
 
-# Installer UI prints on module
-
 ui_print ""
 ui_print "[*] Core Task Optimizer"
 ui_print "[*] Version: v2.1.3 (versionCode: 201530)"
